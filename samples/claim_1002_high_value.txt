@@ -1,0 +1,26 @@
+MERIDIAN GENERAL HOSPITAL - INPATIENT CLAIM
+Submitted through the provider portal
+
+Claim Reference: CLM-1002
+Policy Number: POL-445120
+Claimant Name: David Okafor
+
+Admission notes
+---------------
+The member was admitted through the emergency department with acute abdominal
+pain and underwent an emergency appendectomy the following morning. He remained
+an inpatient for four nights due to a post-operative infection that required a
+course of intravenous antibiotics. He was discharged in stable condition with a
+two-week course of oral antibiotics and a scheduled surgical review.
+
+Billing summary
+---------------
+Amount Claimed: $18,500.00
+
+The figure above covers theatre time, the four-night inpatient stay, medication
+and all consultant reviews during admission.
+
+Total Billed: $18,500.00
+
+Provider certification: the services listed were medically necessary and were
+delivered as described.

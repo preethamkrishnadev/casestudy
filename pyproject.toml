@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claimflow"
+version = "1.0.0"
+description = "An agent that reviews insurance claims and asks a human when it is unsure."
+readme = "README.md"
+requires-python = ">=3.8"
+# the core tool needs nothing but the Python standard library
+dependencies = []
+
+[project.optional-dependencies]
+# only needed if your claims arrive as PDFs
+pdf = ["pypdf>=3.0"]
+
+[project.scripts]
+claimflow = "claimflow.cli:main"
+
+[tool.setuptools]
+packages = ["claimflow"]

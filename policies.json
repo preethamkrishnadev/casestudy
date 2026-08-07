@@ -1,0 +1,27 @@
+{
+  "POL-889231": {
+    "holder": "Maria Gonzalez",
+    "status": "active",
+    "coverage_limit": 50000
+  },
+  "POL-445120": {
+    "holder": "David Okafor",
+    "status": "active",
+    "coverage_limit": 25000
+  },
+  "POL-773094": {
+    "holder": "Aisha Rahman",
+    "status": "active",
+    "coverage_limit": 40000
+  },
+  "POL-201558": {
+    "holder": "Thomas Lindqvist",
+    "status": "lapsed",
+    "coverage_limit": 30000
+  },
+  "POL-660412": {
+    "holder": "Chen Wei",
+    "status": "active",
+    "coverage_limit": 8000
+  }
+}

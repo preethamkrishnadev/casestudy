@@ -1,0 +1,10 @@
+# the live review queue is working data, not source code
+queue/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
