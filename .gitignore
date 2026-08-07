@@ -1,6 +1,11 @@
 # the live review queue is working data, not source code
 queue/
 
+# the daily working folders, created by the operator - see RUNBOOK.md
+inbox/
+archive/
+backups/
+
 __pycache__/
 *.py[cod]
 *.egg-info/

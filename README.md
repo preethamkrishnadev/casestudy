@@ -10,6 +10,10 @@ writes an exception summary for a human caseworker to sign off.
 
 Written in plain Python. **No libraries needed** to run it.
 
+> This README covers what the system is and how it is built. For step-by-step operating
+> procedures — daily run cycle, troubleshooting, backup and escalation — see
+> **[RUNBOOK.md](RUNBOOK.md)**.
+
 ---
 
 ## Try it in 30 seconds
