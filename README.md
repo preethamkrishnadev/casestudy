@@ -3,12 +3,14 @@
 **An agent that reads insurance claim documents, decides what to do with them, and asks a
 human whenever it is not sure.**
 
-It reads a claim (text or PDF), pulls out the claimant's name, the claim amount and the policy
-number, then checks those facts against a set of business rules. Easy claims it approves or
-rejects on its own and writes the letter. Anything big or contradictory it **stops on**, and
-writes an exception summary for a human caseworker to sign off.
+It reads a claim — text, PDF, or a scan with no text in it at all — pulls out the claimant's
+name, the claim amount and the policy number, then checks those facts against a set of business
+rules. Easy claims it approves or rejects on its own and writes the letter. Anything big,
+contradictory, or read off a picture it **stops on**, and writes an exception summary for a human
+caseworker to sign off.
 
-Written in plain Python. **No libraries needed** to run it.
+Written in plain Python. **No libraries needed** for text claims; PDFs and scans each add one
+optional extra — see [Reading PDFs](#reading-pdfs).
 
 > This README covers what the system is and how it is built. For step-by-step operating
 > procedures — daily run cycle, troubleshooting, backup and escalation — see
@@ -60,7 +62,7 @@ A claim walks through five small steps. Each step takes what we know so far and 
 ```
    [1] load  →  [2] extract  →  [3] validate  →  [4] decide  →  [5] draft
         |             |               |               |             |
-      file         name,           7 business      APPROVED      letter or
+      file         name,           8 business      APPROVED      letter or
       to text      amount,         rules           REJECTED      exception
                    policy no.                      NEEDS REVIEW  summary
                                                         |
@@ -87,7 +89,7 @@ python3 -m claimflow show CLM-1002
   Started on claim_1002_high_value.txt
   Read 897 characters from the document.
   Found: claim_id, claimant_name, policy_number, claim_amount
-  Ran 7 rules, 1 failed.
+  Ran 8 rules, 1 failed.
   Decision: NEEDS_REVIEW
   Drafted the document for a caseworker to sign.
   2026-08-07T09:59:11: P. Krishna chose to approve this claim.
@@ -107,6 +109,7 @@ A rule is either a **BLOCK** (reject the claim outright) or a **REVIEW** (stop a
 | `policy_is_active` | BLOCK | the policy has lapsed or been cancelled |
 | `within_coverage_limit` | BLOCK | the claim asks for more than the policy covers |
 | `under_auto_approve_limit` | REVIEW | the claim is over **$10,000** |
+| `text_is_machine_readable` | REVIEW | the document was a scan, so the figures were read by OCR |
 | `name_matches_policy_holder` | REVIEW | the claimant is not the person on the policy |
 
 **How the decision is made**, in `claimflow/agent.py`:
@@ -130,7 +133,8 @@ up.
 | `claim_1004_expired.txt` | REJECTED | The policy lapsed. A BLOCK rule, so the agent decides alone. |
 | `claim_1005_missing.txt` | NEEDS REVIEW | The claimant lost their policy card, so a key fact is missing. |
 | `claim_1006_unreadable.txt` | COULD NOT READ | A blank file, standing in for a bad scan. Proves one broken document does not stop the rest. |
-| `samples_pdf/claim_2001_scanned.pdf` | REJECTED | A real PDF. Asks for $12,400 against a policy that only covers $8,000. |
+| `samples_pdf/claim_2001_scanned.pdf` | REJECTED | A real PDF with a text layer. Asks for $12,400 against a policy that only covers $8,000. |
+| `samples_pdf/claim_2002_scanned.pdf` | NEEDS REVIEW | **A genuine scan** — one picture per page, no text at all. Only OCR can read it, so a human confirms the figures. |
 
 ---
 
@@ -148,6 +152,34 @@ Without it, the agent does not crash. It tells you exactly what to do:
 ```
 CLM-2001   COULD NOT READ   -   This is a PDF, and reading PDFs needs an extra library. Run: pip install pypdf
 ```
+
+### When the PDF is a scan
+
+A claim that came off a fax or a photocopier has no text inside it at all — every page is a
+picture. `pypdf` returns an empty string for those, so the agent falls back to OCR:
+
+```bash
+pip install claimflow[ocr]     # pypdf, pytesseract, pillow
+sudo apt install tesseract-ocr # the OCR program itself
+```
+
+The fallback only fires when there is nothing to copy out (`claimflow/ocr.py:9`), so a PDF with a
+real text layer is never sent through OCR — reading the text directly is both faster and exact.
+
+**OCR output is a guess, so it is never auto-approved.** The `text_is_machine_readable` rule fails
+for any scanned claim, which sends it to a human no matter how clean it looks. The audit trail
+says so plainly:
+
+```
+  Read 540 characters from the document.
+  The PDF had no text layer, so OCR read 1 scanned page(s).
+```
+
+Two honest limits. A page drawn as vector graphics with no text layer and no embedded picture
+still cannot be read — the agent says so rather than guessing. And OCR misreads happen, which is
+exactly why the rule above exists: the caseworker checks the figures against the paper copy.
+
+To rebuild the scanned sample: `python3 tools/make_scanned_sample.py` (needs `pillow`).
 
 ---
 
@@ -275,8 +307,21 @@ records, `--reviewer "Your Name"` to sign your decisions.
 python3 -m unittest discover tests -v
 ```
 
-20 tests, standard library only. They cover every decision path, the error handling, the
-persistence, and the double-decision guard.
+28 tests. They cover every decision path, the error handling, the persistence, the
+double-decision guard, and both PDF routes — the text layer and the OCR fallback.
+
+The tests need no libraries either. The PDF and OCR tests skip themselves with a message when
+the optional extras are missing, so a clean checkout still runs green:
+
+```
+Ran 28 tests in 2.289s
+
+OK (skipped=2)
+```
+
+Install `claimflow[ocr]` and Tesseract and those skips turn into real runs — the OCR tests read
+the sample scan end to end and assert the exact amount, so a regression in the fallback fails the
+build rather than passing quietly.
 
 ---
 
@@ -287,19 +332,21 @@ casestudy/
 ├── claimflow/
 │   ├── models.py     the data shapes, and the conflict check
 │   ├── loaders.py    file on disk → text
+│   ├── ocr.py        scanned page → text, when there is no text to read
 │   ├── extract.py    text → name, amount, policy number
-│   ├── rules.py      the 7 business rules
+│   ├── rules.py      the 8 business rules
 │   ├── agent.py      the 5 steps, run in order, errors caught
 │   ├── letters.py    approval / rejection / exception templates
 │   ├── store.py      the JSON queue: save, load, record a decision
 │   └── cli.py        the run / list / show / review commands
 ├── samples/          six claim documents, one per outcome
-├── samples_pdf/      the same idea, as a PDF
+├── samples_pdf/      a PDF with a text layer, and a genuine scan
+├── tools/            builds the scanned sample; not needed to run anything
 ├── policies.json     stands in for the company's policy database
 └── tests/
 ```
 
-About 930 lines of Python, plus 190 lines of tests. Each file fits on one screen.
+About 1,040 lines of Python, plus 270 lines of tests. Each file fits on one screen.
 
 ---
 
@@ -316,15 +363,21 @@ outcomes, in under a second. Walk the table: one approved outright, one rejected
 stopped for a human, one document that could not even be read — and note that the bad file did
 not stop the other five.
 
-**1:00 - Why it stopped (45s).** Run `python3 -m claimflow show CLM-1002`. Show the exception
+**1:00 - Why it stopped (35s).** Run `python3 -m claimflow show CLM-1002`. Show the exception
 summary: the claim, the amount, the one rule that tripped, and the six checks that passed.
 Point out that this is written for a caseworker, not a developer. Then show the audit trail at
 the bottom — every step the agent took, on the record.
 
-**1:45 - The human decides (45s).** Run `python3 -m claimflow review`. Approve one, reject
+**1:35 - The human decides (35s).** Run `python3 -m claimflow review`. Approve one, reject
 another with a reason. Then run `list` in a **fresh** command to show the decisions survived the
 process exiting — this is a durable queue, not an in-memory pause. Show that the rejected claim's
 exception summary has been replaced by a real rejection letter carrying the caseworker's reason.
+
+**2:10 - The hard document (20s).** Run `python3 -m claimflow run samples_pdf/`. Two PDFs: one
+has text inside it, the other is a photocopy — a picture with no text at all. The agent reads the
+second one with OCR and then **refuses to auto-approve it**, because a machine guessed at those
+figures. Show the audit trail line that says so. This is the honest answer to "what about scanned
+claims": read them, but never trust them silently.
 
 **2:30 - Why it will still work next quarter (30s).** Open `rules.py`. Change
 `AUTO_APPROVE_LIMIT` from `10_000` to `4_000` and re-run: `CLM-1001` flips from APPROVED to
@@ -353,3 +406,11 @@ what to do next. There is no outcome where a claim silently disappears.
 **Rule messages are written for the claimant, not the developer.** Each rule returns its own
 plain-English sentence, and that exact sentence flows into the letter. There is no second place
 where error text has to be kept in sync.
+
+**How the text was obtained is itself a business fact.** OCR is not treated as a quiet
+implementation detail of the loader. `Claim.text_source` records that the words came off a
+picture, and a rule reads it — so "we guessed at this" travels the same path as "the policy has
+lapsed": into the findings, into the letter, into the queue. The alternative, silently handing
+OCR output to the rules, would let a misread decimal point auto-approve a claim. Notably, OCR
+needed **no rasteriser**: a real scan is one image per page, and `pypdf` already hands those
+images over, which keeps the dependency list to Tesseract and Pillow.

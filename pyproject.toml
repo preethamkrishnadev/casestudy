@@ -14,6 +14,10 @@ dependencies = []
 [project.optional-dependencies]
 # only needed if your claims arrive as PDFs
 pdf = ["pypdf>=3.0"]
+# only needed if those PDFs are scans, with pictures instead of text.
+# this one also needs the Tesseract program:  sudo apt install tesseract-ocr
+ocr = ["pypdf>=3.0", "pytesseract>=0.3.10", "pillow>=9"]
+all = ["pypdf>=3.0", "pytesseract>=0.3.10", "pillow>=9"]
 
 [project.scripts]
 claimflow = "claimflow.cli:main"

@@ -68,7 +68,7 @@ tripped, and the six checks that passed — followed by the audit trail:
   Started on claim_1002_high_value.txt
   Read 897 characters from the document.
   Found: claim_id, claimant_name, policy_number, claim_amount
-  Ran 7 rules, 1 failed.
+  Ran 8 rules, 1 failed.
   Decision: NEEDS_REVIEW
   Drafted the document for a caseworker to sign.
 ```
@@ -114,21 +114,68 @@ python3 -m claimflow show CLM-1003
 The exception summary has been replaced by a real rejection letter carrying the reason the
 caseworker typed.
 
-### Step 5 — Run the tests
+### Step 5 — Check the PDF and scanned claims
+
+Skip this step if your claims only ever arrive as text. Otherwise install the extras first
+([B1](#b1-prerequisites)):
+
+```bash
+pip install claimflow[ocr]
+sudo apt install tesseract-ocr
+python3 -m claimflow run samples_pdf/
+```
+
+```
+CLAIM          STATUS                   AMOUNT  WHY
+------------------------------------------------------------------------------
+CLM-2001       REJECTED             $12,400.00  The claim asks for $12,400.00 but the policy only cover...
+CLM-2002       NEEDS REVIEW          $3,150.00  This document was a scan with no text in it, so the fig...
+
+2 claims processed. 1 waiting for a human.
+```
+
+Two different documents. `CLM-2001` is a PDF with real text inside it, read directly. `CLM-2002`
+is a genuine scan — a picture with no text at all — so it was read by OCR. Confirm the agent says
+so:
+
+```bash
+python3 -m claimflow show CLM-2002
+```
+
+```
+  Read 540 characters from the document.
+  The PDF had no text layer, so OCR read 1 scanned page(s).
+```
+
+**What this proves:** scanned claims are read, and are then held back for a person. Every other
+check on `CLM-2002` passed — the only reason it stopped is that a machine guessed at the figures.
+
+Without the extras installed, neither claim crashes the run. Both report `COULD NOT READ` with
+the exact command to fix it. That is also correct behaviour.
+
+### Step 6 — Run the tests
 
 ```bash
 python3 -m unittest discover tests
 ```
 
 ```
-Ran 20 tests in 0.014s
+Ran 28 tests in 2.289s
 
-OK (skipped=1)
+OK (skipped=2)
 ```
 
-One test is skipped unless `pypdf` is installed. That is expected.
+The skip count depends on what is installed, and skips are expected either way:
 
-### Step 6 — Clean up
+| What you have installed | Expect |
+|---|---|
+| Nothing extra | `OK (skipped=6)` — the PDF and OCR tests cannot run |
+| `pypdf` only | `OK (skipped=5)` |
+| `claimflow[ocr]` and Tesseract | `OK (skipped=2)` — the two that remain only check the *missing library* messages, so they skip once the libraries are there |
+
+Anything other than `OK` is a failure. Escalate to engineering.
+
+### Step 7 — Clean up
 
 ```bash
 rm -rf queue
@@ -141,7 +188,7 @@ rm -rf queue
 | A multi-step agent flow | `claimflow/agent.py:75` — the five steps, in order |
 | Custom Python orchestration | `claimflow/agent.py:78` — `run_one`, 30 lines |
 | Extract Name, Amount, Policy Number | `claimflow/extract.py:8` patterns, `claimflow/extract.py:68` extractor |
-| Check against a business rule set | `claimflow/rules.py` — seven rules |
+| Check against a business rule set | `claimflow/rules.py` — eight rules |
 | HITL trigger: claim over $10,000 | `claimflow/rules.py:4` — `AUTO_APPROVE_LIMIT` |
 | HITL trigger: conflicting data | `claimflow/models.py:42` — one line |
 | Agent halts | `Status.NEEDS_REVIEW`, written to disk rather than raised as an error |
@@ -149,6 +196,10 @@ rm -rf queue
 | Human sign-off | `claimflow/store.py:61` — `record_decision` |
 | Error handling | `claimflow/agent.py:78` — a `try` around every step |
 | State management | `claimflow/store.py` — one JSON file per claim |
+
+One thing goes beyond the brief: **scanned documents**. Claims that arrive as pictures rather
+than text are read by OCR (`claimflow/ocr.py`) and then always held for a human
+(`claimflow/rules.py` — `text_is_machine_readable`). Step 5 above verifies it.
 
 ## A3. What is not in this repository
 
@@ -166,6 +217,7 @@ for it under "Suggested 3-minute demo".
 | Python | 3.8 or newer. Built and tested on 3.10. |
 | Libraries | **None** for text claims. |
 | PDF claims | `pip install pypdf` — only if your claims arrive as PDFs. |
+| Scanned claims | `pip install claimflow[ocr]` **and** `sudo apt install tesseract-ocr` — only if those PDFs are pictures rather than text. |
 | Where you run it | From the repository folder. |
 
 Check Python before anything else:
@@ -217,6 +269,9 @@ Now run the health check in [B7](#b7-health-check). Do not process real claims u
 ```bash
 cp /path/to/new/claims/*.txt inbox/
 ```
+
+Anything the agent can read may go in: `.txt`, `.text` and `.pdf`. Any other file type is
+ignored when you point `run` at a folder.
 
 **2. Run the agent.**
 
@@ -286,8 +341,8 @@ halfway never loses the work you have done.
 |---|---|---|
 | `APPROVED` | Every rule passed. The agent decided alone. | Nobody. Sign the letter and pay. |
 | `REJECTED` | A blocking rule failed — lapsed policy, unknown policy, or over the coverage limit. | Nobody. Sign and send the letter. |
-| `NEEDS REVIEW` | The agent stopped. Too big, contradictory, or missing a fact. | **Caseworker.** Run `review`. |
-| `COULD NOT READ` | The document could not be opened or had no text. No claim was assessed. | **Operator.** See [B9](#b9-troubleshooting). |
+| `NEEDS REVIEW` | The agent stopped. Too big, contradictory, missing a fact, or read off a scan by OCR. | **Caseworker.** Run `review`. |
+| `COULD NOT READ` | The document could not be opened, had no text, or needed a library that is not installed. No claim was assessed. | **Operator.** See [B9](#b9-troubleshooting). |
 | `APPROVED BY HUMAN` | A caseworker approved it. | Nobody. Closed. |
 | `REJECTED BY HUMAN` | A caseworker rejected it. | Nobody. Closed. |
 
@@ -340,7 +395,9 @@ Run this after installing, after any rule change, and any time behaviour looks w
 python3 -m unittest discover tests
 ```
 
-Expect `Ran 20 tests` and `OK (skipped=1)`. Anything else — stop and escalate to engineering.
+Expect `Ran 28 tests` and `OK`. The skip count depends on which optional libraries you have —
+see the table in [A1 Step 6](#step-6--run-the-tests). Anything other than `OK` — stop and
+escalate to engineering.
 
 **2. The known claims**, into a scratch queue so live work is untouched:
 
@@ -361,6 +418,21 @@ All six outcomes must match exactly:
 | claim_1006 | COULD NOT READ |
 
 If any row differs, something changed that should not have. Do not process live claims.
+
+**3. The PDF and scanned claims** — only if you process PDFs:
+
+```bash
+python3 -m claimflow --queue /tmp/healthcheck run samples_pdf/
+rm -rf /tmp/healthcheck
+```
+
+| Claim | Must say |
+|---|---|
+| CLM-2001 | REJECTED |
+| CLM-2002 | NEEDS REVIEW |
+
+If `CLM-2002` says `APPROVED`, stop immediately and escalate. A scanned claim must never be
+auto-approved — that would mean the `text_is_machine_readable` rule is no longer firing.
 
 ## B8. Changing the rules
 
@@ -411,7 +483,11 @@ given under the old rules.
 |---|---|---|
 | `No module named claimflow` | You are in the wrong folder. | `cd` to the repository folder and try again. |
 | `This is a PDF, and reading PDFs needs an extra library.` | A PDF arrived and `pypdf` is not installed. | `pip install pypdf`, then run again. |
-| `The file opened but had no text in it.` | Blank file, or a scan that is an image with no readable text. | The claim was **not** assessed. Get a better copy, or process it by hand. |
+| `The file opened but had no text in it.` | A blank file. | The claim was **not** assessed. Get a better copy, or process it by hand. |
+| `This PDF has no text layer, so it has to be read by OCR.` | A scanned PDF arrived and the OCR libraries are not installed. | `pip install claimflow[ocr]`, then run again. |
+| `This PDF needs OCR, and the Tesseract program itself is missing.` | The Python packages are installed but the OCR program behind them is not. | `sudo apt install tesseract-ocr`, then run again. |
+| `This PDF has no text in it and no pictures we could read.` | A PDF drawn as vector graphics — no text layer and no scanned image. OCR cannot help. | The claim was **not** assessed. Ask the provider for the original, or process it by hand. |
+| A scanned claim always says NEEDS REVIEW | Working as designed. The `text_is_machine_readable` rule stops every OCR'd claim. | Check the figures against the paper copy, then `review` it. |
 | `Cannot read '.json' files. We handle: .pdf, .text, .txt` | A file type we do not support ended up in the inbox. | Remove it from `inbox/`. Only claim documents belong there. |
 | `Error: There is nothing at '/path'.` | The path is wrong or the folder was moved. | Check the path. Run `ls` on it. |
 | `Error: No saved claim called 'CLM-9999'.` | That claim is not in the queue. | Run `list` to see the real references. Check you are using the right `--queue`. |
@@ -463,6 +539,8 @@ the output for `COULD NOT READ` rows.
 | `archive/` | Documents already processed | No |
 | `queue/` | Agent state, one JSON file per claim | No — this is your live data |
 | `samples/` | Six example claims used by the health check | Yes |
+| `samples_pdf/` | One PDF with a text layer, one genuine scan | Yes |
+| `tools/` | Rebuilds the scanned sample. Never needed to run the agent. | Yes |
 | `policies.json` | The policy records | Yes |
 
 Queue files are named after the claim reference: `queue/CLM-1002.json`. If a document has no

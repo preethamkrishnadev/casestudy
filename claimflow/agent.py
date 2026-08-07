@@ -29,13 +29,20 @@ class Context:
 
 def step_load(state, context):
     """Step 1: turn the file into text."""
-    state.claim.raw_text = loaders.load(state.claim.source_file)
+    reading = loaders.Reading()
+    state.claim.raw_text = loaders.load(state.claim.source_file, reading)
+    state.claim.text_source = reading.text_source
     state.log(f"Read {len(state.claim.raw_text)} characters from the document.")
+    for line in reading.notes:
+        state.log(line)
 
 
 def step_extract(state, context):
     """Step 2: find the name, amount and policy number."""
+    text_source = state.claim.text_source
     state.claim = context.extractor.extract(state.claim.raw_text, state.claim.source_file)
+    # the extractor hands back a fresh claim, so carry how we read it across
+    state.claim.text_source = text_source
     found = [
         name
         for name in ("claim_id", "claimant_name", "policy_number", "claim_amount")

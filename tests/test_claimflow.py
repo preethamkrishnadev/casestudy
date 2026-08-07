@@ -10,7 +10,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from claimflow import Status, run_folder, run_one
-from claimflow import store
+from claimflow import ocr, store
 from claimflow.extract import RegexExtractor
 from claimflow.rules import RULES
 
@@ -127,6 +127,88 @@ class TestPdfClaims(unittest.TestCase):
         self.skipTest("pypdf is installed, so there is no missing-library message to check")
 
 
+def ocr_is_available():
+    """True when both the OCR libraries and the Tesseract program are installed."""
+    try:
+        import pypdf  # noqa: F401
+        import pytesseract
+        from PIL import Image  # noqa: F401
+
+        pytesseract.get_tesseract_version()
+    except Exception:
+        # any failure here means we cannot run OCR, whatever the reason
+        return False
+    return True
+
+
+class TestBlankPageDetection(unittest.TestCase):
+    """Do we know a page with no text on it when we see one?"""
+
+    def test_nothing_at_all_looks_empty(self):
+        self.assertTrue(ocr.looks_empty(""))
+
+    def test_a_stray_form_feed_looks_empty(self):
+        # a scanned PDF often hands back this much and no more
+        self.assertTrue(ocr.looks_empty("\x0c \n\x0c"))
+
+    def test_a_real_page_does_not_look_empty(self):
+        self.assertFalse(ocr.looks_empty("Claim Reference: CLM-2002\nClaim Amount: $3,150.00"))
+
+
+class TestOcrFallback(unittest.TestCase):
+    """Can we read a claim that arrived as a picture instead of as text?"""
+
+    SCAN = os.path.join(os.path.dirname(HERE), "samples_pdf", "claim_2002_scanned.pdf")
+    TEXT_PDF = os.path.join(os.path.dirname(HERE), "samples_pdf", "claim_2001_scanned.pdf")
+
+    def setUp(self):
+        if not ocr_is_available():
+            self.skipTest("OCR is not set up; run: pip install claimflow[ocr]")
+
+    def test_scanned_pdf_is_read_by_ocr(self):
+        state = run_one(self.SCAN)
+        self.assertEqual(state.claim.claim_id.value, "CLM-2002")
+        self.assertEqual(state.claim.policy_number.value, "POL-445120")
+        self.assertEqual(state.claim.amount, 3150.0)
+        self.assertEqual(state.claim.text_source, "ocr")
+
+    def test_ocr_claim_always_stops_for_a_human(self):
+        state = run_one(self.SCAN)
+        # nothing else is wrong with this claim, so OCR is the only reason it stopped
+        self.assertEqual(state.status, Status.NEEDS_REVIEW)
+        self.assertEqual(["text_is_machine_readable"], [f.rule for f in state.problems])
+
+    def test_the_audit_trail_says_ocr_was_used(self):
+        state = run_one(self.SCAN)
+        self.assertIn("OCR", " ".join(state.history))
+
+    def test_a_pdf_with_real_text_does_not_use_ocr(self):
+        # OCR is the fallback, never the first thing we reach for
+        state = run_one(self.TEXT_PDF)
+        self.assertEqual(state.claim.text_source, "text")
+        self.assertNotIn("text_is_machine_readable", [f.rule for f in state.problems])
+
+
+class TestOcrIsOptional(unittest.TestCase):
+    """Does a missing OCR setup explain itself instead of crashing?"""
+
+    SCAN = os.path.join(os.path.dirname(HERE), "samples_pdf", "claim_2002_scanned.pdf")
+
+    def test_missing_ocr_gives_a_clear_message(self):
+        if ocr_is_available():
+            self.skipTest("OCR is set up, so there is no missing-OCR message to check")
+        try:
+            import pypdf  # noqa: F401
+        except ImportError:
+            self.skipTest("pypdf is not installed, so we never reach the OCR step")
+
+        state = run_one(self.SCAN)
+        self.assertEqual(state.status, Status.FAILED)
+        # the caseworker must be told exactly what to install
+        self.assertIn("install", state.error)
+        self.assertIn("COULD NOT PROCESS", state.letter)
+
+
 class TestEveryClaimGetsALetter(unittest.TestCase):
     """No claim may leave the agent without something a human can read."""
 
@@ -181,7 +263,7 @@ class TestRulesAreExtensible(unittest.TestCase):
     """Adding a rule should need no changes anywhere else."""
 
     def test_every_rule_has_a_name_and_a_severity(self):
-        self.assertEqual(len(RULES), 7)
+        self.assertEqual(len(RULES), 8)
         for rule in RULES:
             self.assertTrue(rule.name)
             self.assertIn(rule.severity, ("BLOCK", "REVIEW"))

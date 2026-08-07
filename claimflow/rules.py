@@ -127,6 +127,17 @@ def under_auto_approve_limit(claim, policies):
     return True, f"The amount is under the ${AUTO_APPROVE_LIMIT:,.0f} auto-approval limit."
 
 
+@rule("text_is_machine_readable", REVIEW)
+def text_is_machine_readable(claim, policies):
+    """Words read off a scan are a best guess, so a person must confirm them."""
+    if claim.was_read_by_ocr:
+        return False, (
+            "This document was a scan with no text in it, so the figures were read "
+            "by OCR and may be wrong. Please check them against the paper copy."
+        )
+    return True, "The document had real text in it, so nothing had to be guessed."
+
+
 @rule("name_matches_policy_holder", REVIEW)
 def name_matches_policy_holder(claim, policies):
     """The person claiming must be the person on the policy."""

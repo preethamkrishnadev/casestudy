@@ -52,6 +52,13 @@ class Claim:
     claim_amount: Field = field(default_factory=Field)
     source_file: str = ""
     raw_text: str = ""
+    # "text" if we copied the words straight out, "ocr" if we read them off a scan
+    text_source: str = "text"
+
+    @property
+    def was_read_by_ocr(self):
+        """True when the words came from a picture, so they are a best guess."""
+        return self.text_source == "ocr"
 
     @property
     def amount(self):
@@ -109,6 +116,7 @@ class ClaimState:
                 "claim_amount": self.claim.claim_amount.values,
                 "source_file": self.claim.source_file,
                 "raw_text": self.claim.raw_text,
+                "text_source": self.claim.text_source,
             },
             "findings": [vars(f) for f in self.findings],
             "status": self.status.value,
@@ -128,6 +136,8 @@ class ClaimState:
             claim_amount=Field(raw["claim_amount"]),
             source_file=raw["source_file"],
             raw_text=raw["raw_text"],
+            # claims saved before OCR existed were all read as plain text
+            text_source=raw.get("text_source", "text"),
         )
         return ClaimState(
             claim=claim,
